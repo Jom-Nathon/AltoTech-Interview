@@ -1,0 +1,32 @@
+smart_hotel/
+├── docker-compose.yml
+├── .env
+├── requirements.txt
+├── agents/
+│   ├── iaq_sensor.py
+│   ├── life_being_sensor.py
+│   └── datalogger.py
+├── backend/
+│   ├── Dockerfile
+│   ├── manage.py
+│   ├── smart_hotel/
+│   │   ├── __init__.py
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   └── wsgi.py
+│   └── api/
+│       ├── __init__.py
+│       ├── models.py
+│       ├── views.py
+│       ├── serializers.py
+│       └── urls.py
+├── frontend/
+│   ├── Dockerfile
+│   └── src/
+├── chat/
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   ├── app.py
+│   └── api_client.py
+└── docs/
+    └── setup.md 

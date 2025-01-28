@@ -1,0 +1,4 @@
+gradio==4.19.2
+anthropic==0.18.1
+python-dotenv==1.0.0
+requests==2.31.0 

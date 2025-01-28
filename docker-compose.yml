@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=smart_hotel
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+
+  backend:
+    build: 
+      context: ./backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - timescaledb
+      - rabbitmq
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@timescaledb:5432/smart_hotel
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./backend:/app
+
+  iaq_sensor:
+    build: 
+      context: ./agents
+      dockerfile: Dockerfile
+    command: python iaq_sensor.py
+    depends_on:
+      - rabbitmq
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+
+  life_being_sensor:
+    build:
+      context: ./agents
+      dockerfile: Dockerfile
+    command: python life_being_sensor.py
+    depends_on:
+      - rabbitmq
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+
+  datalogger:
+    build:
+      context: ./agents
+      dockerfile: Dockerfile
+    command: python datalogger.py
+    depends_on:
+      - rabbitmq
+      - timescaledb
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - DATABASE_URL=postgres://postgres:postgres@timescaledb:5432/smart_hotel
+
+  chat:
+    build:
+      context: ./chat
+    ports:
+      - "7860:7860"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - BACKEND_URL=http://backend:8000/api
+    depends_on:
+      - backend
+
+volumes:
+  timescaledb_data: 
