@@ -30,7 +30,7 @@ A comprehensive IoT-based hotel management system that provides real-time monito
 
 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/smart-hotel.git
+git clone https://github.com/Jom-Nathon/AltoTech-Interview
 cd smart-hotel
 ```
 
