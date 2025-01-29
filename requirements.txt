@@ -1,0 +1,4 @@
+pika
+sqlmodel
+psycopg2-binary
+pydantic-settings

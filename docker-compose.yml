@@ -1,82 +1,120 @@
-version: '3.8'
-
 services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    hostname: timescaledb
+    ports:
+      - 5433:5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: jommy348
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    command: postgres -c max_connections=100 -c shared_buffers=128MB
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    hostname: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=jommy348
+
+  supabase:
+    image: supabase/postgres:15.8.1.031
+    hostname: supabase
+    ports:
+      - "5431:5432"
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf -c max_connections=100 -c shared_buffers=128MB
+    environment:
+      POSTGRES_PASSWORD: jommy348
+
+  pgadmin:
+    image: dpage/pgadmin4
+    hostname: pgadmin
+    ports:
+      - "8080:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+
   rabbitmq:
     image: rabbitmq:3-management
+    hostname: rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
     environment:
       - RABBITMQ_DEFAULT_USER=guest
       - RABBITMQ_DEFAULT_PASS=guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
 
-  timescaledb:
-    image: timescale/timescaledb:latest-pg14
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=smart_hotel
-    volumes:
-      - timescaledb_data:/var/lib/postgresql/data
-
-  backend:
+  iaq-agent:
     build: 
-      context: ./backend
-    ports:
-      - "8000:8000"
-    depends_on:
-      - timescaledb
-      - rabbitmq
+      context: .
+      dockerfile: iot/iaq/Dockerfile.IAQAgent
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@timescaledb:5432/smart_hotel
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-    volumes:
-      - ./backend:/app
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
-  iaq_sensor:
+  lifebeing-agent:
     build: 
-      context: ./agents
-      dockerfile: Dockerfile
-    command: python iaq_sensor.py
-    depends_on:
-      - rabbitmq
+      context: .
+      dockerfile: iot/lifebeing/Dockerfile.LifeBeingAgent
     environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
-  life_being_sensor:
-    build:
-      context: ./agents
-      dockerfile: Dockerfile
-    command: python life_being_sensor.py
-    depends_on:
-      - rabbitmq
+  powermeter-agent:
+    build: 
+      context: .
+      dockerfile: iot/powermeter/Dockerfile.PowerMeterAgent
     environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   datalogger:
-    build:
-      context: ./agents
-      dockerfile: Dockerfile
-    command: python datalogger.py
-    depends_on:
-      - rabbitmq
-      - timescaledb
+    build: 
+      context: .
+      dockerfile: iot/datalogger/Dockerfile.DataLogger
     environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-      - DATABASE_URL=postgres://postgres:postgres@timescaledb:5432/smart_hotel
-
-  chat:
-    build:
-      context: ./chat
-    ports:
-      - "7860:7860"
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - BACKEND_URL=http://backend:8000/api
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=jommy348
+      - POSTGRES_SERVER=timescaledb
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=postgres
     depends_on:
-      - backend
+      rabbitmq:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
-  timescaledb_data: 
+  timescale_data:  
