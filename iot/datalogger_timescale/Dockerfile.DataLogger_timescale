@@ -20,4 +20,4 @@ COPY iot /app/iot
 ENV PYTHONPATH=/app
 
 # Run the DataLogger
-CMD ["python", "-m", "iot.datalogger.DataLogger"]
+CMD ["python", "-m", "iot.datalogger_timescale.DataLogger_timescale"]

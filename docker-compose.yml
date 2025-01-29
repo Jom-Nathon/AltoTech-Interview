@@ -91,18 +91,42 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  datalogger:
+  datalogger_supabase:
     build: 
       context: .
-      dockerfile: iot/datalogger/Dockerfile.DataLogger
+      dockerfile: iot/datalogger_supabase/Dockerfile.DataLogger_supabase
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=jommy348
-      - POSTGRES_SERVER=timescaledb
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=postgres
+      - SUPABASE_USER=postgres
+      - SUPABASE_PASSWORD=jommy348
+      - SUPABASE_SERVER=supabase
+      - SUPABASE_PORT=5432
+      - SUPABASE_DB=postgres
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      supabase:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+  datalogger_timescale:
+    build: 
+      context: .
+      dockerfile: iot/datalogger_timescale/Dockerfile.DataLogger_timescale
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - TIMESCALE_USER=postgres
+      - TIMESCALE_PASSWORD=jommy348
+      - TIMESCALE_SERVER=timescaledb
+      - TIMESCALE_PORT=5432
+      - TIMESCALE_DB=postgres
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -118,3 +142,4 @@ services:
 
 volumes:
   timescale_data:  
+  supabase_data:
