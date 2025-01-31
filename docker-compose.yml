@@ -18,12 +18,22 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16
+    image: postgres:17.1
     hostname: postgres
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_PASSWORD=jommy348
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: jommy348
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    command: postgres -c max_connections=100 -c shared_buffers=128MB
 
   supabase:
     image: supabase/postgres:15.8.1.031
@@ -140,6 +150,54 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile.Backend
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=jommy348
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=postgres
+
+      - TIMESCALE_USER=postgres
+      - TIMESCALE_PASSWORD=jommy348
+      - TIMESCALE_SERVER=timescaledb
+      - TIMESCALE_PORT=5432
+      - TIMESCALE_DB=postgres
+
+      - SUPABASE_USER=postgres
+      - SUPABASE_PASSWORD=jommy348
+      - SUPABASE_SERVER=supabase
+      - SUPABASE_PORT=5432
+      - SUPABASE_DB=postgres
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      supabase:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - default
+
+  initpostgres:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.initpostgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"  # Run once and stop
+
 volumes:
   timescale_data:  
   supabase_data:
+  postgres_data:
+
+networks:
+  default:
+    driver: bridge

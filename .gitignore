@@ -23,6 +23,9 @@ wheels/
 .coverage
 htmlcov/
 
+initpostgres.py
+logs/
+
 # Virtual Environment
 venv/
 env/

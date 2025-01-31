@@ -1,0 +1,11 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install dependencies
+RUN pip install sqlmodel psycopg2-binary
+
+# Copy initialization script
+COPY initpostgres.py .
+
+CMD ["python", "initpostgres.py"]

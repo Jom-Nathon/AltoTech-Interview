@@ -27,10 +27,11 @@ engine = create_engine(settings.SUPABASE_URL, echo=True)
 class NewestData(SQLModel, table=True):
     __tablename__ = "newest_data"
 
-    timestamp: int = Field(index=True)
-    date_time: str = Field(index=True)
-    device_id_datapoint: str = Field(index=True, primary_key=True)
-    value: str = Field(index=True)
+    timestamp: int = Field()
+    date_time: str = Field()
+    device_id: str = Field(primary_key=True)
+    datapoint: str = Field(primary_key=True)
+    value: str = Field()
 
 def create_db_and_tables():
     try:
@@ -54,30 +55,30 @@ def connect_rabbitmq():
             time.sleep(5)
 
 def store_measurement_supabase(data: dict):
-    try:
-        with Session(engine) as session:
-            if "device_id" not in data:
-                device_id=""
-            else:
-                device_id = str(data["device_id"])
-            dt_obj = datetime.datetime.strptime(data["datetime"], '%Y-%m-%d %H:%M:%S.%f')
-            timestamp = int(dt_obj.timestamp())
-            date_time = dt_obj.strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]
-            
-            for key, value in data.items():
-                if key not in ["device_id", "datetime"] and value is not None:
-                    if device_id == "":
-                        if key == "power_kw_power_meter_6":
-                            device_id_datapoint = f"{key}/Plug Load System"
-                        elif key in ["power_kw_power_meter_4", "power_kw_power_meter_5"]:
-                            device_id_datapoint = f"{key}/Lighting System"
-                        elif key in ["power_kw_power_meter_1", "power_kw_power_meter_2", "power_kw_power_meter_3"]:
-                            device_id_datapoint = f"{key}/AC System"
-                    else:
-                        device_id_datapoint = f"{device_id}/{key}"
-                    
-                    # Try to find existing record
-                    statement = select(NewestData).where(NewestData.device_id_datapoint == device_id_datapoint)
+    with Session(engine) as session:
+        if "device_id" not in data:
+            device_id = ""
+        else:
+            device_id = str(data["device_id"])
+
+        dt_obj = datetime.datetime.strptime(data["datetime"], '%Y-%m-%d %H:%M:%S.%f')
+        timestamp = int(dt_obj.timestamp())
+        date_time = dt_obj.strftime('%Y-%m-%d %H:%M:%S.%f')[:-4]
+        
+        for key, value in data.items():
+            if key not in ["device_id", "datetime"] and value is not None:
+                if device_id in ["","power_kw_power_meter_6", "power_kw_power_meter_4", "power_kw_power_meter_5", "power_kw_power_meter_3", "power_kw_power_meter_2", "power_kw_power_meter_1"]:
+                    device_id = key
+                    temp_datapoint = "power"
+                else:
+                    temp_datapoint = key
+
+                try:
+                    # Try to find existing record with composite key
+                    statement = select(NewestData).where(
+                        NewestData.device_id == device_id,
+                        NewestData.datapoint == temp_datapoint
+                    )
                     result = session.exec(statement).first()
                     
                     if result:
@@ -86,24 +87,26 @@ def store_measurement_supabase(data: dict):
                         result.date_time = date_time
                         result.value = str(value)
                         session.add(result)
-                        logger.info(f"Updated existing record for {device_id_datapoint}")
+                        logger.info(f"Updated record for device {device_id}, datapoint {temp_datapoint}")
                     else:
                         # Create new record
                         new_data = NewestData(
-                            device_id_datapoint=device_id_datapoint,
+                            device_id=device_id,
+                            datapoint=temp_datapoint,
                             timestamp=timestamp,
                             date_time=date_time,
                             value=str(value)
                         )
                         session.add(new_data)
-                        logger.info(f"Created new record for {device_id_datapoint}")
-            
-            session.commit()
-            logger.info(f"Successfully stored/updated data for device {device_id}")
-            
-    except Exception as e:
-        logger.error(f"Error storing data: {e}")
-        session.rollback()
+                        logger.info(f"Created record for device {device_id}, datapoint {temp_datapoint}")
+                    
+                    # Commit each record individually to handle errors better
+                    session.commit()
+                    
+                except Exception as e:
+                    session.rollback()
+                    logger.error(f"Error processing datapoint {temp_datapoint} for device {device_id}: {e}")
+                    continue           
 
 def on_message_recieved(ch, method, properties, body):
     try:
