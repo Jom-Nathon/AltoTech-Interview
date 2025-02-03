@@ -22,8 +22,6 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
-
-initpostgres.py
 logs/
 
 # Virtual Environment

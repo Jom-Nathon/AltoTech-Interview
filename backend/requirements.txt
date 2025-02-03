@@ -1,3 +1,10 @@
 Django
 djangorestframework
 psycopg2-binary
+django-cors-headers
+pandas
+httpx
+logfire
+pydantic-ai
+fastapi
+pydantic_settings

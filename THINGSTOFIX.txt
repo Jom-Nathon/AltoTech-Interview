@@ -1,0 +1,9 @@
+1.csv file link
+2.auto click on input field
+3.backend power summary additional parameters
+4.frontend header clipping issue
+5.fix some frontend text.
+6.database supabase implement the whole thing/ get console
+7.chat logic + make better pydantic AI tool use logic
+8.optional: maybe make additional data for second hotel
+9.optional: make multiple iot data sources for more realistic data stream

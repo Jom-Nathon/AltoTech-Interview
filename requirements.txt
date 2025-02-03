@@ -2,3 +2,6 @@ pika
 sqlmodel
 psycopg2-binary
 pydantic-settings
+pydantic-ai
+fastapi
+

@@ -5,9 +5,13 @@ from .models import Hotel, Room, Sensor, NewestData, RawData
 from .serializers import HotelSerializer, RoomSerializer, SensorSerializer, NewestDataSerializer, RawDataSerializer
 from django.db import connection, connections
 from django.conf import settings
-import psycopg2, csv
+import json, csv
 from datetime import datetime, timedelta
 from django.http import HttpResponse
+from .chat.chat import Chat, smart_hotel_agent
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 
 @api_view(['GET'])
 def get_all_hotels(request):
@@ -262,3 +266,24 @@ def get_energy_consumption(request, hotel_id):
             "detail": "Error connecting to TimescaleDB",
             "type": type(e).__name__
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+@csrf_exempt
+@require_http_methods(["POST"])
+async def chat_endpoint(request):
+    try:
+        data = json.loads(request.body)
+        message = data.get('message')
+        
+        chat = Chat()
+        deps = chat.get_deps_for_query(message)
+        result = await smart_hotel_agent.run(message, deps=deps)
+        
+        return JsonResponse({
+            "data": result.data,
+            "status": "success"
+        })
+    except Exception as e:
+        return JsonResponse({
+            "error": str(e),
+            "status": "error"
+        }, status=500)
