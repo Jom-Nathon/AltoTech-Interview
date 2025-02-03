@@ -29,6 +29,7 @@ venv/
 env/
 ENV/
 .env
+config.py
 
 # IDEs and Editors
 .idea/
