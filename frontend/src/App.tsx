@@ -12,7 +12,7 @@ function App() {
     messages: [
       {
         id: '1',
-        content: 'Hello! I am a smart hotel analytics assistant. I can help you analyze your hotel sensor data and power usage. Try asking about temperature trends, energy consumption patterns, or occupancy-based power usage.',
+        content: "Hello! I'm AltoTech Assistant, and I'm here to help you! How can I assist you today? I can help you with information about: - Hotels and their facilities - Floors and rooms - Sensor data - Indoor air quality - Life being detection - Power meter readings Please let me know what information you're looking for, and I'll be happy to help!",
         role: 'assistant',
         timestamp: new Date(),
       },
@@ -79,7 +79,7 @@ function App() {
             background: 'linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,0) 100%)',
           }}
         >
-          AltoTech Smart Energy Assistant
+          AltoTech Intelligent Comfort Assistant
         </div>
 
         {/* Chat Messages */}

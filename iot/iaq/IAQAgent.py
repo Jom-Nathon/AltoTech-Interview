@@ -27,11 +27,11 @@ def connect_rabbitmq():
             print("Waiting for RabbitMQ...")
             time.sleep(5)
 
-def gen_data():
-    device_id = str(random.randint(1,20))
+def gen_data(device_id: str):
     temperature = round(random.uniform(10,50), 1)
     humidity = round(random.uniform(1,100), 1)
     co2 = round(random.uniform(300,2000), 1)
+
     data = {
             "device_id": device_id,
             "datetime": str(datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')),
@@ -45,10 +45,12 @@ def main():
     connection, channel = connect_rabbitmq()
     try:
         while True:
-            data = gen_data()
-            channel.basic_publish(exchange='pubsub', routing_key='', body=data)
-            print(f"Publishing IAQ data: {data}")
-            time.sleep(5)
+            for device_id in range(1,20):
+                data = gen_data(device_id)
+                channel.basic_publish(exchange='pubsub', routing_key='', body=data)
+                print(f"Publishing IAQ data: {data}")
+                time.sleep(2)
+
     finally:
         connection.close()
 

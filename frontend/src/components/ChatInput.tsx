@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 
 interface ChatInputProps {
@@ -8,18 +8,37 @@ interface ChatInputProps {
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, disabled }) => {
   const [input, setInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const focusInput = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
+  useEffect(() => {
+    focusInput();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim()) {
-      onSendMessage(input.trim());
-      setInput('');
+      try {
+        await onSendMessage(input.trim());
+        setInput('');
+        requestAnimationFrame(() => {
+          focusInput();
+        });
+      } catch (error) {
+        console.error('Error sending message:', error);
+      }
     }
   };
 
   return (
     <form onSubmit={handleSubmit} className="flex items-center gap-2 bg-white p-3 border-t border-gray-200">
       <input
+        ref={inputRef}
         type="text"
         value={input}
         onChange={(e) => setInput(e.target.value)}

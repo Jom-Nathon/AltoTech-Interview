@@ -1,4 +1,4 @@
-# Smart Hotel System
+# Intelligent Comfort System
 
 A comprehensive IoT-based hotel management system that provides real-time monitoring of room conditions, energy consumption tracking, and an AI-powered chat interface for guest interactions.
 

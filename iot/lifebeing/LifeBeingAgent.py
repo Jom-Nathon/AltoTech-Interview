@@ -27,8 +27,7 @@ def connect_rabbitmq():
             print("Waiting for RabbitMQ...")
             time.sleep(5)
 
-def gen_data():
-    device_id = str(random.randint(21,40))
+def gen_data(device_id: str):
     online_status = random.choice(["online","offline"])
     sensitivity = round(random.uniform(300,2000), 1)
     presence_state = random.choice(["occupied","unoccupied"])
@@ -45,10 +44,12 @@ def main():
     connection, channel = connect_rabbitmq()
     try:
         while True:
-            data = gen_data()
-            channel.basic_publish(exchange='pubsub', routing_key='', body=data)
-            print(f"Publishing LifeBeing data: {data}")
-            time.sleep(5)
+            for device_id in range(21,40):
+                data = gen_data(device_id)
+                channel.basic_publish(exchange='pubsub', routing_key='', body=data)
+                print(f"Publishing LifeBeing data: {data}")
+                time.sleep(2)
+
     finally:
         connection.close()
 

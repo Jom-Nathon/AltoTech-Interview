@@ -1,15 +1,17 @@
 from __future__ import annotations as _annotations
 
-import os
+import asyncio, json
 from dataclasses import dataclass
 from .config import settings
+from .intent_classifier import intent_classifier
+from django.db import connections
+from asgiref.sync import sync_to_async
 
 import httpx
 import logfire
-from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai import Agent, RunContext
 # from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 # from pydantic_ai.models.openai import OpenAIModel
-# from devtools import debug
 from pydantic_ai.models.anthropic import AnthropicModel
 import pandas as pd
 
@@ -20,227 +22,224 @@ import pandas as pd
 #     api_key = os.getenv('OPEN_ROUTER_API_KEY')
 # )
 
-
 logfire.configure(send_to_logfire='if-token-present')
 
 @dataclass
-class AllHotel:
-    endpoint: str = "http://localhost:8000/hotels/"
+class supportDependencies:
+    hotel_id: str = "1"
+    floor_id: str = "all"
+    room_id: str = "all"
 
-@dataclass
-class FloorList:
-    hotel_id: str
-    endpoint: str = None
-    def __post_init__(self):
-        if self.endpoint is None:
-            self.endpoint = f"http://localhost:8000/hotels/{self.hotel_id}/floors/"
-@dataclass
-class RoomList:
-    floor_id: str
-    endpoint: str = None
-    def __post_init__(self):
-        if self.endpoint is None:
-            self.endpoint = f"http://localhost:8000/floors/{self.floor_id}/rooms/"
-@dataclass
-class RoomData:
-    room_id: str
-    endpoint: str = None
+    # def __init__(self, intent: str):
+    #     self.intent = intent
+    #     seperated_intent = self.intent.split(" ")
+    #     for block in seperated_intent:
+    #         if "parameters" in block:
+    #             pattern = r'<parameters>(.*?)</parameters>'
+    #             match = re.search(pattern, block)
+    #             if match:
+    #                 splited_parameters = match.group(1).split(",")
+    #                 for parameter in splited_parameters:
+    #                     if "hotel_id" in parameter:
+    #                         self.hotel_id = parameter.split(":")[1]
+    #                     elif "floor_id" in parameter:
+    #                         self.floor_id = parameter.split(":")[1]
+    #                     elif "room_id" in parameter:
+    #                         self.room_id = parameter.split(":")[1]
 
-    def __post_init__(self):
-        if self.endpoint is None:
-            self.endpoint = f"http://localhost:8000/rooms/{self.room_id}/data/"
-@dataclass
-class RoomDataIAQ:
-    room_id: str
-    endpoint: str = None
-    def __post_init__(self):
-        if self.endpoint is None:
-            self.endpoint = f"http://localhost:8000/rooms/{self.room_id}/data/iaq/"
-@dataclass
-class RoomDataLifeBeing:
-    room_id: str
-    endpoint: str = None
-    def __post_init__(self):
-        if self.endpoint is None:
-            self.endpoint = f"http://localhost:8000/rooms/{self.room_id}/data/life_being/"
-@dataclass
-class PowerMeterData:
-    hotel_id: str
-    meter_type: str
-    endpoint: str = None
-    
-    def __post_init__(self):
-        if self.endpoint is None:
-            self.endpoint = f"http://localhost:8000/hotels/{self.hotel_id}/energy_summary/"
+
+    # "http://localhost:8000/hotels/"
+    # f"http://localhost:8000/hotels/{self.hotel_id}/floors/"
+    # f"http://localhost:8000/floors/{self.floor_id}/rooms/"
+
+    # f"http://localhost:8000/rooms/{self.room_id}/data/"
+    # f"http://localhost:8000/rooms/{self.room_id}/data/iaq/"
+    # f"http://localhost:8000/rooms/{self.room_id}/data/life_being/"
+    # f"http://localhost:8000/hotels/{self.hotel_id}/energy_summary/"
+
 
 system_prompt = """
-You are a virtual assistance with access to smart hotel api to help inform the user about the hotel information that have installed AltoTech smart hotel system. This may include the hotel information about the hotel, room information, life sensor data, iaq sensor data and the power usage data.
+You are a female ai assistant. Your name is AltoTech Assistant created by the company AltoTech.
+Your goal will be to provide user with the requested information according to the provided tools and intent.
+You should always maintain friendly and professional tone in your response.
+If the information is not available or not found, just say so. Don't make up an answer.
+Dont explain the answer, just provide the datapoints.
+You will be provided with a list of tools and parameters to be used in order. Sometimes the parameters that was provided will not be enough to get the information.
+There are 2 types of sensor. First is IAQ sensor that is used to measure the temperature, humidity and co2. Second is life being sensor that is used to measure the occupancy, online status and sensitivity.
+When user ask for power summary. Answer with download link first and then your answer. If the answer is too long, summerize your answer from the datapoints.
 
-AltoTech smart hotel system is a system with sensors installed in the hotel to collect data and send to the cloud. Each hotel has multiple floors and rooms. In every room, there are 2 sensors installed to collect data, one for life sensor and one for iaq sensor. Lastly, each hotel has a power meter installed inside a special room called power room.
+Example:
+User: can you give me power summary for hotel 1?
+Assistant: Download link: http://localhost:8000/hotels/1/energy_summary/
+Recent power consumption data for Hotel 1 shows: - AC consumption ranging from 9.97 to 10.02 kWh - Lighting usage between 9.87 to 10.10 kWh - Plug load varying from 9.87 to 10.02 kWh The consumption patterns appear relatively stable across all three categories over the reported period.
 
-The power meter data is seperated by meter type, which is either AC, lighting, plug load or total. Only provide the data that the user asked for.
-
-Your only job is to assist with this and you don't answer other questions besides describing what you are able to do.
-
-Don't ask the user before taking an action, just do it. Always make sure you look at the database or api with the provided tools before answering the user's question unless you have already.
-
-When answering a question about the sensor data or room information, always start your answer with the provided sensor data or room information first and then give your answer on a newline. Like:
-
-[Sensor data/Room information]
-
-Your answer here...
-
-When answering a question about the power usage, always start your answer with the URL link to download CSV. Then type out the csv file in easy to read format on a new line. Lastly give your answer on a last line. Like:
-
-[Link to download power meter data]
-
-[CSV file typed out in easy to read format]
-
-Your answer here...
-
-Also, when user didn't ask for a specific meter type, always provide the total meter data by combining all the meter type energy usage and call the new row total. The energy usage is in kW/h.
-
-When user specify the resolution, only provide the data that match the resolution.
-
-Lastly, when user specify that they need end time and start time for the power meter data, always provide the data in the same format as timestamp. That data should be in new row and remove timestamp.
-
-Start time is always timestamp-resolution. End time is always timestamp.
+How do you respond to the user's question?
+Think about your answer first before you respond.
 """
 
+
 model = AnthropicModel('claude-3-5-sonnet-latest', api_key=settings.ANTROPIC_API_KEY)
-
-async def get_hotels(ctx: RunContext[AllHotel]) -> str:
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(ctx.deps.endpoint)
-        return response.json()
-    
-async def get_floor_list(ctx: RunContext[FloorList]) -> str:
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(ctx.deps.endpoint)
-        return response.json()
-
-async def get_room_list(ctx: RunContext[RoomList]) -> str:
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(ctx.deps.endpoint)
-        return response.json()
-
-async def get_room_data(ctx: RunContext[RoomData]) -> str:
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(ctx.deps.endpoint)
-        return response.json()
-
-async def get_room_iaq(ctx: RunContext[RoomDataIAQ]) -> str:
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(ctx.deps.endpoint)
-        return response.json()
-
-async def get_room_life_being(ctx: RunContext[RoomDataLifeBeing]) -> str:
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(ctx.deps.endpoint)
-        return response.json()
-
-async def get_power_meter_data(ctx: RunContext[PowerMeterData]):
-
-    response = pd.read_csv(ctx.deps.endpoint)
-    link = str(ctx.deps.endpoint)
-    return f"{link}\n{response.to_string()}"
 
 smart_hotel_agent = Agent(
     model,
     system_prompt=system_prompt,
-    deps_type=[AllHotel, FloorList, RoomList, RoomData, RoomDataIAQ, RoomDataLifeBeing, PowerMeterData],
-    tools=[
-        get_hotels,
-        get_floor_list,
-        get_room_list,
-        get_room_data,
-        get_room_iaq,
-        get_room_life_being,
-        get_power_meter_data
-    ],
-    retries=2
+    # deps_type=[supportDependencies],
+    retries=3
 )
 
-class Chat:
+@smart_hotel_agent.tool_plain
+async def get_all_hotels() -> str:
+    @sync_to_async
+    def db_query():
+        with connections['default'].cursor() as cursor:
+            base_query = """
+                SELECT * FROM hotel
+            """
+            cursor.execute(base_query)
+            return cursor.fetchall()
+    data = await db_query()
+    return json.dumps(data)
+    
+@smart_hotel_agent.tool_plain
+async def get_floors() -> str:
+    @sync_to_async
+    def db_query():
+        with connections['default'].cursor() as cursor:
+            base_query = """
+                SELECT * FROM floor
+            """
+            cursor.execute(base_query)
+            return cursor.fetchall()
+    data = await db_query()
+    return json.dumps(data)
 
-    def get_deps_for_query(self, query: str):
-        """Determine which dependency to use based on the query"""
-        query = query.lower()
-        words = query.split()
-        
-            # Look for specific identifiers
-        room_id = next((
-            words[i+1] for i, word in enumerate(words) 
-            if word == "room" and i+1 < len(words) and words[i+1].isdigit()
-        ), "101")
-        
-        floor_id = next((
-            words[i+1] for i, word in enumerate(words) 
-            if word == "floor" and i+1 < len(words) and words[i+1].isdigit()
-        ), "1")
-        
-        hotel_id = next((
-            words[i+1] for i, word in enumerate(words) 
-            if word == "hotel" and i+1 < len(words) and words[i+1].isdigit()
-        ), "1")
 
-        if 'iaq' in query or 'air quality' in query:
-            return RoomDataIAQ(room_id=room_id)
-        
-        if 'life' in query or 'occupancy' in query:
-            return RoomDataLifeBeing(room_id=room_id)
-            
-        if 'room data' in query or 'room information' in query:
-            return RoomData(room_id=room_id)
-        
-        if 'room list' in query or 'room number' in query or 'room information' in query:
-            return RoomList(floor_id=floor_id)
-            
-        if 'floor' in query:
-            return FloorList(hotel_id=hotel_id)
-            
-        if 'power' in query or 'energy' in query:
-            return PowerMeterData(hotel_id=hotel_id, meter_type="total")
-            
-        # Default to AllHotel for general queries
-        return AllHotel()
+@smart_hotel_agent.tool_plain
+async def get_rooms() -> str:
+    @sync_to_async
+    def db_query():
+        with connections['default'].cursor() as cursor:
+            base_query = """
+                SELECT * FROM room
+            """
+            cursor.execute(base_query)
+            return cursor.fetchall()
+    data = await db_query()
+    return json.dumps(data)
 
-    # async def process_message(self, message:str):
-    #     deps = self.get_deps_for_query(message)
-    #     result = await smart_hotel_agent.run(
-    #                     message,
-    #                     deps=deps
-    #         )
-    #     return result.data
+@smart_hotel_agent.tool_plain
+async def get_current_sensor_data(room_id: str) -> str:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"http://localhost:8000/rooms/{room_id}/data/")
+        return response.json()
+    
+@smart_hotel_agent.tool_plain
+async def get_historical_sensor_data(device_id: str, time_range: str = '24h') -> str:
+    @sync_to_async
+    def db_query():
+        with connections['timescaledb'].cursor() as cursor:
+            bucket_width = '1 hour'
+
+            base_query = """
+                WITH stats AS (
+                    SELECT 
+                        time_bucket(%s, date_time) AS bucket,
+                        device_id,
+                        datapoint,
+                        avg(CAST(value AS FLOAT)) AS mean
+                    FROM raw_data
+                    WHERE device_id = %s
+                    AND date_time >= NOW() - %s::interval
+                    GROUP BY bucket, device_id, datapoint
+                    ORDER BY bucket DESC
+                )
+                SELECT 
+                    bucket,
+                    device_id,
+                    datapoint,
+                    mean
+                FROM stats
+            """
+
+            try:
+                cursor.execute(base_query, [
+                    bucket_width,
+                    device_id,
+                    time_range
+                ])
                 
-    #             if user_input.lower() in ['exit', 'quit', 'q']:
-    #                 print("\nGoodbye!")
-    #                 break
+                # Convert results to structured format
+                results = {}
+                columns = [col[0] for col in cursor.description]
+                for row in cursor.fetchall():
+                    row_dict = dict(zip(columns, row))
+                    bucket_str = row_dict['bucket'].isoformat()
+                    
+                    if bucket_str not in results:
+                        results[bucket_str] = {}
+                    
+                    results[bucket_str][row_dict['datapoint']] = row_dict['mean']
 
-    #             if not user_input:
-    #                 print("Please type something!")
-    #                 continue
+                return {
+                    'time_range': time_range,
+                    'bucket_width': bucket_width,
+                    'device_id': device_id,
+                    'data': results
+                }
 
-    #             deps = self.get_deps_for_query(user_input)
-    #             print("\nThinking...")
-                
-    #             
 
-    #             print("\nAssistant:", result.data)
+            except Exception as e:
+                print(f"Database error: {str(e)}")
+                return None
 
-    #         except Exception as e:
-    #             print(f"\nError: {str(e)}")
-    #             print("Please try again or type 'exit' to quit.")
+    data = await db_query()
+    return json.dumps(data)
 
+@smart_hotel_agent.tool_plain
+async def get_powermeter_from_hotel(hotel_id: str, resolution: str, start_date: str, end_date: str, subsystem: str) -> str:
+
+    valid_subsystems = ['ac', 'lighting', 'plug_load', 'all']
+    if subsystem not in valid_subsystems:
+        return "Invalid subsystem. Please choose from: ac, lighting, plug_load or all"
+    
+    valid_resolutions = ['daily', 'monthly', 'yearly']
+    if resolution not in valid_resolutions:
+        return "Invalid resolution. Please choose from: daily, monthly, yearly"
+
+    if start_date and end_date:
+        link = str(f"http://localhost:8000/hotels/{hotel_id}/energy_summary/?resolution={resolution}&start_date={start_date}&end_date={end_date}&subsystem={subsystem}")
+    else:
+        link = str(f"http://localhost:8000/hotels/{hotel_id}/energy_summary/?resolution={resolution}&subsystem={subsystem}")
+    response = pd.read_csv(link)
+    return f"<CSV_link>{link}</CSV_link>", response.to_string()
+
+
+# async def get_tool_order(user_input: str) -> dict:
+#     intent = await intent_classifier.run(user_input)
+#     tasks = intent.data.split(" ")
+
+#     for task in tasks:
+#         if "parameters" in task:
+#             pattern = r'<parameters>(.*?)</parameters>'
+#             match = re.search(pattern, task)
+#             if match:
+#                 return match.group(1)  # Returns 'hotel_id:1'
+#             return ''
+#             return tool, parameters
+#         else:
+#             return task
+
+# class Chat:
+#     async def process_message():
+#         # intent = await intent_classifier.run("hello can you give me energy summary of hotel 1?")
+#         deps = supportDependencies()
+#         result = await smart_hotel_agent.run(
+#                         "hello can you give me energy summary of hotel 1?",
+#                         deps=deps
+#                 )
+#         print(result.data)
 # async def main():
-#     chat = Chat()
-#     await chat.chat()
+#     await Chat.process_message()
 
 # if __name__ == '__main__':
 #     asyncio.run(main())

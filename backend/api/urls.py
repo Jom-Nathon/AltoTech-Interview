@@ -8,8 +8,7 @@ urlpatterns = [
     path('rooms/<str:room_id>/data/', get_room_data, name='get_room_data'),
     path('rooms/<str:room_id>/data/life_being/', get_life_being, name='get_life_being'),
     path('rooms/<str:room_id>/data/iaq/', get_iaq, name='get_iaq'),
-    path('hotels/<str:hotel_id>/energy_summary/', get_energy_consumption, name='get_energy_consumption'),
-    # path('chat/<str:message>/', chat_endpoint, name='chat_endpoint'),
+    path('hotels/<str:hotel_id>/energy_summary/', get_energy_summary, name='get_energy_summary'),
     path('chat/', chat_endpoint, name='chat'),
 ]
 

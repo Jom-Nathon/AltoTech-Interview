@@ -1,17 +1,18 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Hotel, Room, Sensor, NewestData, RawData
-from .serializers import HotelSerializer, RoomSerializer, SensorSerializer, NewestDataSerializer, RawDataSerializer
-from django.db import connection, connections
-from django.conf import settings
+from .models import Hotel, Room, Sensor, NewestData
+from .serializers import HotelSerializer, RoomSerializer, NewestDataSerializer
+from django.db import connections
 import json, csv
-from datetime import datetime, timedelta
+from datetime import datetime
 from django.http import HttpResponse
-from .chat.chat import Chat, smart_hotel_agent
+from .chat.chat import smart_hotel_agent, supportDependencies
+from .chat.intent_classifier import intent_classifier
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+
 
 @api_view(['GET'])
 def get_all_hotels(request):
@@ -120,145 +121,109 @@ VALID_RESOLUTIONS = {
 @api_view(['GET'])
 def get_energy_summary(request, hotel_id):
     try:
-        end_time = datetime.now()
-        start_time = end_time - timedelta(days=30)
+        resolution = request.GET.get('resolution')
+        start_time = request.GET.get('start_time', '2024-01-01T00:00:00Z')
+        end_time = request.GET.get('end_time', datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+        subsystem = request.GET.get('subsystem', 'all')
 
-        query = """
-            WITH bucketed_data AS (
-                SELECT 
-                    %s as resolution,
-                    time_bucket(%s, date_time) AS timestamp,
-                    CASE 
-                        WHEN device_id IN ('power_meter_1', 'power_meter_2', 'power_meter_3') THEN 'ac'
-                        WHEN device_id IN ('power_meter_4', 'power_meter_5') THEN 'lighting'
-                        WHEN device_id = 'power_meter_6' THEN 'plug_load'
-                    END as subsystem,
-                    SUM(CAST(value AS FLOAT)) as total_kw,
-                    COUNT(*) as reading_count
-                FROM raw_data
-                WHERE date_time BETWEEN %s AND %s
-                    AND device_id IN (
-                        'power_meter_1', 'power_meter_2', 'power_meter_3',
-                        'power_meter_4', 'power_meter_5', 'power_meter_6'
-                    )
-                GROUP BY timestamp, subsystem
+        VALID_RESOLUTIONS = [
+            'hourly',
+            'daily',
+            'monthly'
+        ]
+
+        if resolution not in VALID_RESOLUTIONS:
+            return Response(
+                {"error": f"Invalid resolution. Must be one of: {', '.join(VALID_RESOLUTIONS)}"},
+                status=status.HTTP_400_BAD_REQUEST
             )
-            SELECT 
-                resolution,
-                timestamp,
-                MAX(CASE WHEN subsystem = 'ac' THEN total_kw END) as ac_kwh,
-                MAX(CASE WHEN subsystem = 'lighting' THEN total_kw END) as lighting_kwh,
-                MAX(CASE WHEN subsystem = 'plug_load' THEN total_kw END) as plug_load_kwh
-            FROM bucketed_data
-            GROUP BY resolution, timestamp
-            ORDER BY resolution, timestamp;
-        """
+        if resolution == 'hourly':
+            resolution = '1 hour'
+        elif resolution == 'daily':
+            resolution = '1 day'
+        elif resolution == 'monthly':
+            resolution = '1 month'
 
-        # Create CSV response
-        response = HttpResponse(content_type='text/csv')
-        filename = f"energy_consumption_{hotel_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        
-        writer = csv.writer(response)
-        writer.writerow(['Resolution', 'Timestamp', 'AC (kWh)', 'Lighting (kWh)', 'Plug Load (kWh)'])
-
-        # Execute query for each resolution
-        with connection.cursor() as cursor:
-            for resolution_name, resolution_value in VALID_RESOLUTIONS.items():
-                cursor.execute(
-                    query, 
-                    [
-                        resolution_name,
-                        resolution_value,
-                        start_time,
-                        end_time
-                    ]
-                )
-                
-                for row in cursor.fetchall():
-                    # Convert kW to kWh based on resolution
-                    hours = 1
-                    if resolution_name == 'daily':
-                        hours = 24
-                    elif resolution_name == 'monthly':
-                        hours = 720  # 30 days * 24 hours
-                    
-                    # Calculate kWh for each subsystem
-                    ac_kwh = row[2] * hours if row[2] else 0
-                    lighting_kwh = row[3] * hours if row[3] else 0
-                    plug_load_kwh = row[4] * hours if row[4] else 0
-                    
-                    writer.writerow([
-                        row[0],  # Resolution
-                        row[1],  # Timestamp
-                        round(ac_kwh, 2),
-                        round(lighting_kwh, 2),
-                        round(plug_load_kwh, 2)
-                    ])
-
-        return response
-
-    except Exception as e:
-        return Response(
-            {
-                "error": str(e),
-                "detail": "Error generating energy consumption report"
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-@api_view(['GET'])
-def get_energy_consumption(request, hotel_id):
-    """Simple test to verify TimescaleDB connection and list tables"""
-    try:
+        # Validate subsystem
+        VALID_SUBSYSTEMS = ['ac', 'lighting', 'plug_load', 'all']
+        if subsystem not in VALID_SUBSYSTEMS:
+            return Response(
+                {"error": f"Invalid subsystem. Must be one of: {', '.join(VALID_SUBSYSTEMS)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         # Use the timescaledb connection
         with connections['timescaledb'].cursor() as cursor:
-            queryAC = """
-                SELECT time_bucket(%s, date_time) AS bucket,
+            base_query = """
+                SELECT 
+                    time_bucket(%s, date_time) AS bucket,
                     avg(CAST(value AS FLOAT)) AS avg_value
                 FROM raw_data
-                WHERE device_id IN ('power_kw_power_meter_1', 'power_kw_power_meter_2', 'power_kw_power_meter_3')
-                GROUP BY bucket
-                ORDER BY bucket ASC;
-            """
-            queryLighting = """
-                SELECT time_bucket(%s, date_time) AS bucket,
-                    avg(CAST(value AS FLOAT)) AS avg_value
-                FROM raw_data
-                WHERE device_id IN ('power_kw_power_meter_4', 'power_kw_power_meter_5')
-                GROUP BY bucket
-                ORDER BY bucket ASC;
-            """
-            queryPlugLoad = """
-                SELECT time_bucket(%s, date_time) AS bucket,
-                    avg(CAST(value AS FLOAT)) AS avg_value
-                FROM raw_data
-                WHERE device_id = 'power_kw_power_meter_6'
-                GROUP BY bucket
-                ORDER BY bucket ASC;
+                WHERE date_time BETWEEN %s AND %s
             """
 
-            resolutions = ['1 hour', '1 day', '1 month']
+            # Add subsystem filter
+            ac_query = base_query + " AND device_id IN ('power_kw_power_meter_1', 'power_kw_power_meter_2', 'power_kw_power_meter_3')"
+            lightning_query = base_query + " AND device_id IN ('power_kw_power_meter_4', 'power_kw_power_meter_5')"
+            plug_load_query = base_query + " AND device_id = 'power_kw_power_meter_6'"
+
+            # Add grouping and ordering
+            if resolution != 'all':
+                ac_query += " GROUP BY bucket ORDER BY bucket ASC"
+                lightning_query += " GROUP BY bucket ORDER BY bucket ASC"
+                plug_load_query += " GROUP BY bucket ORDER BY bucket ASC"
+            else:
+                ac_query += " ORDER BY bucket ASC"
+                lightning_query += " ORDER BY bucket ASC"
+                plug_load_query += " ORDER BY bucket ASC"
+
+
             response = HttpResponse(content_type='text/csv')
 
-            for resolution in resolutions:
-                filename = f"energy_consumption_{hotel_id}.csv"
-                response['Content-Disposition'] = f'attachment; filename="{filename}"'
-                cursor.execute(queryAC,[resolution])
-                ACdata = cursor.fetchall()
-                cursor.execute(queryLighting,[resolution])
-                Lightingdata = cursor.fetchall()
-                cursor.execute(queryPlugLoad,[resolution])
-                PlugLoaddata = cursor.fetchall()
+            filename = f"energy_consumption_{hotel_id}.csv"
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
+            if subsystem == 'ac':
+                cursor.execute(ac_query,[resolution, start_time, end_time])
+                ACdata = cursor.fetchall()
                 writer = csv.writer(response)
-                writer.writerow(['resolution', 'timestamp', 'ac', 'lighting', 'plug_load'])
+                writer.writerow(['timestamp', 'ac'])
 
                 for i in range(len(ACdata)):
-                    writer.writerows([[resolution, ACdata[i][0], ACdata[i][1], Lightingdata[i][1], PlugLoaddata[i][1]]])
-                
-            return response
+                    writer.writerows([[ACdata[i][0], ACdata[i][1]]])
 
+            elif subsystem == 'lighting':
+                cursor.execute(lightning_query,[resolution, start_time, end_time])
+                Lightingdata = cursor.fetchall()
+                writer = csv.writer(response)
+                writer.writerow(['timestamp', 'lighting'])
+
+                for i in range(len(Lightingdata)):
+                    writer.writerows([[Lightingdata[i][0], Lightingdata[i][1]]])
+
+            elif subsystem == 'plug_load':
+                cursor.execute(plug_load_query,[resolution, start_time, end_time])
+                PlugLoaddata = cursor.fetchall()
+                writer = csv.writer(response)
+                writer.writerow(['timestamp', 'plug_load'])
+
+                for i in range(len(PlugLoaddata)):
+                    writer.writerows([[PlugLoaddata[i][0], PlugLoaddata[i][1]]])
+
+            else:
+                cursor.execute(ac_query,[resolution, start_time, end_time])
+                ACdata = cursor.fetchall()
+                cursor.execute(lightning_query,[resolution, start_time, end_time])
+                Lightingdata = cursor.fetchall()
+                cursor.execute(plug_load_query,[resolution, start_time, end_time])
+                PlugLoaddata = cursor.fetchall()
+                writer = csv.writer(response)
+
+                writer.writerow(['timestamp', 'ac', 'lighting', 'plug_load'])
+
+                for i in range(len(ACdata)):
+                    writer.writerows([[ACdata[i][0], ACdata[i][1], Lightingdata[i][1], PlugLoaddata[i][1]]])
+
+            return response
 
     except Exception as e:
         return Response({
@@ -270,20 +235,17 @@ def get_energy_consumption(request, hotel_id):
 @csrf_exempt
 @require_http_methods(["POST"])
 async def chat_endpoint(request):
-    try:
+    # try:
         data = json.loads(request.body)
         message = data.get('message')
-        
-        chat = Chat()
-        deps = chat.get_deps_for_query(message)
-        result = await smart_hotel_agent.run(message, deps=deps)
-        
+        result = await smart_hotel_agent.run(message)
+
         return JsonResponse({
             "data": result.data,
             "status": "success"
         })
-    except Exception as e:
-        return JsonResponse({
-            "error": str(e),
-            "status": "error"
-        }, status=500)
+    # except Exception as e:
+    #     return JsonResponse({
+    #         "error": str(e),
+    #         "status": "error"
+    #     }, status=500)
