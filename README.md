@@ -71,6 +71,7 @@ docker-compose up --build
 | `/api/rooms/<room_id>/data/life_being` | GET | Get room life being sensor data |
 | `/api/rooms/<room_id>/data/iaq` | GET | Get room iaq sensor data |
 | `/api/hotels/<hotel_id>/energy_summary/` | GET | Get csv energy consumption reports |
+| `/chat/` | POST | Post reponse from chat bot api |
 
 ## System Architecture
 
