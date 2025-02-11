@@ -1,7 +1,12 @@
 # AltoTech Fullstack Software Developer Test
 
+![image14](https://github.com/user-attachments/assets/61065858-d641-4d94-b83f-1debdd7cc4b8)
+
+
 This repo is made for AltoTech interview test project.
 A comprehensive IoT-based hotel management system that provides real-time monitoring of room conditions, energy consumption tracking, and an AI-powered chat interface for guest interactions.
+
+![messageImage_1739252572076](https://github.com/user-attachments/assets/f3a19a54-d991-4b24-ae57-000e103bede4)
 
 ## Features
 
