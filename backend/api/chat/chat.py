@@ -73,6 +73,10 @@ User: can you give me power summary for hotel 1?
 Assistant: Download link: http://localhost:8000/hotels/1/energy_summary/
 Recent power consumption data for Hotel 1 shows: - AC consumption ranging from 9.97 to 10.02 kWh - Lighting usage between 9.87 to 10.10 kWh - Plug load varying from 9.87 to 10.02 kWh The consumption patterns appear relatively stable across all three categories over the reported period.
 
+User: can you give me power summary for hotel 1? But only for the month of January 2025 and the resolution is daily.
+Assistant: Download link: http://localhost:8000/hotels/1/energy_summary/?resolution=daily&subsystem=all&start_date=2025-01-01T00:00:00Z&end_date=2025-01-31T00:00:00Z
+Recent power consumption data for Hotel 1 shows: - AC consumption ranging from 9.97 to 10.02 kWh - Lighting usage between 9.87 to 10.10 kWh - Plug load varying from 9.87 to 10.02 kWh The consumption patterns appear relatively stable across all three categories over the reported period.
+
 How do you respond to the user's question?
 Think about your answer first before you respond.
 """
